@@ -1,4 +1,4 @@
 all: src/cserialMultiplexing.c
-	gcc -o cserialmux src/cserialMultiplexing.c -lncurses -lm
+	gcc -o cserialMux src/cserialMultiplexing.c -lncurses -lm
 clean: freqmod
 	rm cserialmux

@@ -57,6 +57,10 @@ const int DEFAULT_S_RATE = 44100;
 
 #define DEFAULTAMPLITUDE 1
 
+#define DEFAULT_BASEBANDF 1
+#define DEFAULT_PASSBANDF 5000
+
+#define OUTFILE "rawout"
 
 typedef int int1;
 
@@ -105,21 +109,23 @@ encoding BASK(tym t, char* bits);
 encoding QAM4(tym t, char* bits);
 encoding basebandCarrier(tym time);
 encoding passbandCarrier(tym time);
+byte writeData(uint16_t i2);
 
 carrier basebandcarrier;
 carrier passbandcarrier;
 char data[B_SIZE];
 encoding buffer[B_OUT_SIZE];
-uint32_t datalen;
+double datalen = 0.125;	//1 bit = 1/8 bytes
 
-float modConstantkf, modIndex;
+float modConstantkf;
+float modIndex = 0.2;	//default
 
 int main(int argc, char **argv) 
 {
 	int i;
 	uint16_t j, k, i2;
 	tym time;
-	encoding basebandvalue, passbandvalue;			//confirm data type
+	encoding basebandvalue, passbandvalue;	
 	byte modType, bitspersym;
 	int S_RATE = DEFAULT_S_RATE;
 	
@@ -130,7 +136,9 @@ int main(int argc, char **argv)
 	int Sympos, Symposprev, BitPos;
 	char bitsinSymbol[16];
 	
-	
+	basebandfrequency = DEFAULT_BASEBANDF;
+	passbandfrequency = DEFAULT_PASSBANDF;
+	SymRate = 1;	
 	///* parse command line options 
     while ((i = getopt (argc, argv, "f:b:m:p:l:r:k:s:h")) != -1) {
 	switch (i) {
@@ -180,41 +188,43 @@ int main(int argc, char **argv)
 	readData(FileName);
 	modType = modulationTypeIndex(modTypes);
 	bitspersym = bitsperSymbol(modType);
-	//		printf("BitsperSym: %d\n", bitspersym);
 	
 	basebandcarrier.frequency = basebandfrequency;
 	basebandcarrier.amplitude = DEFAULTAMPLITUDE;
 	passbandcarrier.frequency = passbandfrequency;
-	passbandcarrier.amplitude = (float)DEFAULTAMPLITUDE;
-	
+	passbandcarrier.amplitude = DEFAULTAMPLITUDE;
+	printf("Baseband frequency (-b) set to: %f Hz\n", basebandcarrier.frequency); //remove from here
+	printf("Passband frequency (-p) set to: %f Hz\n", passbandcarrier.frequency); //remove from here
+	printf("Baseband amplitude set to: %f\n", basebandcarrier.amplitude); //remove from here
+	printf("Passband amplitude set to: %f\n", passbandcarrier.amplitude); //remove from here
 	j = 0;
-	k = 8 * datalen; //number of bits of data to be sent
+	k = (int) (8 * datalen); //number of bits of data to be sent
+	printf("Length of data to be sent (-l) set to:%d bits\n", (int) (8*datalen));//remove from here
 	SymRate *= basebandcarrier.frequency;
+	printf("Symbol Rate (-r) set to: %f symbols/s\n", SymRate);						//remove from here
 	Tsym = 1/SymRate;
 	time = 0;
 	int bytepos;
+	
 	float T_RATE = (1.0/S_RATE);
-	//		printf("amplitude: %f\n", basebandcarrier.amplitude);
-	//		printf("Sampling Rate: %d\n", S_RATE);
-	//		printf("SymRate: %f\n", SymRate);
-	//		printf("Tsym: %f\n", Tsym);
-	//		printf("NumBits: %d\n", k);
-	//		printf("time: %f\n", time);
-	//		printf("T_RATE: %f\n", T_RATE);
-	//exit(0);
+	printf("Sampling Rate (-s) set to: %d symbols/s\n", S_RATE);						//remove from here
 	float basebandT = 1/basebandcarrier.frequency;
+	//
 	Symposprev = 0;
 	byte bit;
 	modConstantkf = (modIndex * basebandcarrier.frequency)/basebandcarrier.amplitude;
+	printf("Modulation Index (-k) set to: %f\n", modIndex);						//remove from here
+	printf("Modulation Constant set to: %f\n", modConstantkf);					//remove from here
+	
+	printf(".\n..\n...\n....\n");
 	i2 = 0;
-
+	
 	while(j < k)
 	{
 		Sympos = floor(time/Tsym);	//symbol position
 		BitPos = (Sympos * bitspersym) + 1 - 1;	//start of bits for current symbol -1(Index from zero)
-				
+		//goto temporaryend;
 		bytepos = floor(BitPos/8);
-		//printf("BitPos: %d\n", BitPos);
 		
 		byte beetpos = 0;
 			
@@ -223,39 +233,28 @@ int main(int argc, char **argv)
 		{
 			bit = getBit(bytepos, beetpos++);
 			bitsinSymbol[ind] = bit;
-			//printf("%d", bitsinSymbol[ind]);
 		}
 
 		
 		encoding basebandval = basebandmodulation(modType, time, bitsinSymbol);
-		//printf("B_val: %f\n", basebandval);
 		encoding passbandval = passbandmodulation(modType, basebandval, time);
 		buffer[i2] = passbandval;
-		//printf("Pas_val: %f\n", passbandval);
-		//printf("%f\n", buffer[i2]);
 		i2++;
 		
-			
-		//time += 0.2;//(tym) T_RATE;
 		time += T_RATE;
-		//		printf("time: %f\n", time);
-		//if(i2 ==2)		exit(0);
-		//		printf("k: %d, j: %d, bitspersym: %d\n", k, j, bitspersym);
 		if(Sympos > Symposprev )
 		{
 			Symposprev++;
 			j += bitspersym;
-			//printf("Sympos: %d, t: %f, Tsym: %f, bytepos: %d, k: %d, j:%d\n", Sympos, t, Tsym, bytepos,k,j);
 			
 		}
-		
-//*/		
+			
 	}
-	//cserialmultiplexing.exe -f TrialFile.txt -b 10.4 -m  4QAM -p 12.5 -l 12 -r 1 -k 0.5
-	fwrite(buffer, sizeof(encoding), i2, stdout);
-
-
-    return 0;
+	//fwrite(buffer, sizeof(encoding), i2, stdout);
+	byte writeSuccess = writeData(i2);
+	if(writeSuccess == 0)csExit(1, "");
+	MSGf("Data successfully written to tmp/rawout");
+   return 0;
 }
 
 byte getBit(int bytepos, int bitpos)
@@ -275,8 +274,15 @@ void readData(char *fname)
 {
 	uint32_t i;
 	char c;
-	FILE* dataFile = fopen(fname, "r");
-	if(dataFile == NULL)csExit(0, fname);
+	char ifname[FNAMELEN];
+	strcat(ifname,"tmp/");
+	strcat(ifname,fname);
+	FILE* dataFile = fopen(ifname, "r");
+	if(dataFile == NULL)
+	{
+		usage();
+		csExit(0, fname);
+	}
 	i = 0;
 	while(i < datalen)
 	{
@@ -284,9 +290,20 @@ void readData(char *fname)
 		if( feof(dataFile))break ;
 		data[i++] = c;
 	}
-	//data[i] = '\n';
-	//printf("%s\n", data);
-	//exit(0);
+
+}
+
+byte writeData(uint16_t i2)
+{
+	char ofname[FNAMELEN];
+	strcat(ofname,"tmp/");
+	strcat(ofname,OUTFILE);
+	FILE* dataFile = fopen(ofname, "w");
+	if(dataFile == NULL) return false;
+	
+	
+	fwrite(buffer, sizeof(encoding), i2, dataFile);
+	return true;
 }
 
 void csExit(byte errorCode, char* msg)
@@ -296,6 +313,9 @@ void csExit(byte errorCode, char* msg)
 	{
 		case 0:
 			fprintf(stderr,"File (%s) not found.\n", msg);
+			break;
+		case 1:
+			fprintf(stderr, "Error writing to tmp/rawout. Check that tmp/ exists and you have the permission to write to it\n");
 			break;
 	}
 	exit(0);
@@ -422,7 +442,9 @@ encoding passbandCarrier(tym t)
 
 byte modulationTypeIndex(char* modtype)
 {
-	byte ret = 12;
+	//char tmp[128];
+	byte ret = 12;					//default
+	strcmp(modtype,"")==0?strcat(modtype,"BASE"):false;
 	strcmp(modtype,"BPSK")==0?ret = 0:false;
 	strcmp(modtype,"BFSK")==0?ret = 1:false;
 	strcmp(modtype,"BASK")==0?ret = 2:false;
@@ -438,6 +460,8 @@ byte modulationTypeIndex(char* modtype)
 	strcmp(modtype,"BASE")==0?ret = 12:false;
 	strcmp(modtype,"PASS")==0?ret = 13:false;
 	strcmp(modtype,"SINGLT")==0?ret = 14:false;
+	
+	printf("Modulation type Set to: %d (%s)\n", ret, modtype); //remove from here
 	return ret;
 }
 
@@ -484,6 +508,8 @@ byte bitsperSymbol(byte modType)
 		default:
 			ret = 0;
 	}
+	
+	printf("Bits/Symbol Set to: %d \n", ret); //remove from here
 	return ret;
 }
 
@@ -492,7 +518,7 @@ void usage(void) {
     MSGf("Usage: cserialMultiplexing {options}\n");
     MSGf("Available options:\n");
     MSGf(" -h print this help\n");
-    MSGf(" -f <str> Name of file with data to be modulated\n");
+    MSGf(" -f <str> Name of file with data to be modulated. Stored in tmp/ folder in root dir\n");
     MSGf(" -b <float> baseband frequency in Hz\n");
     MSGf(" -m <str> Modulation type ['BPSK, 'BFSK', 'BASK', '4QAM', '8QAM',..., '2048QAM', 'PASS', 'BASE', 'SINGLT for SingleTone']\n");
     MSGf(" -p <float> passband frequency in KHz\n");
@@ -504,58 +530,8 @@ void usage(void) {
 
 //F:b:m:p:n:l:h
 
-void MSGf (char* MSGf)
+void MSGf (char* msgf)
 {
-	printf(MSGf);
+	printf("%s", msgf);
 }
 
-/*
-
-./cserialmux -f TrialFile.txt -b 0.159154943 -m  BASE -p 12.5 -l 1 -r 1 -k 0.5 -s 8|sox -b 32 -t raw -r 8 -s -L -c1 -e float -b 32 - "outpute.wav" &&  sox outpute.wav outpute.dat
-
-./cserialmux -f TrialFile.txt -b 1591.54943 -m  BASE -p 12.5 -l 10 -r 1 -k 0.5 -s 44100|sox -b 32 -t raw -r 44100 -s -L -c1 -e float -b 32 - "outpute.wav" &&  sox outpute.wav outpute.dat && sox outpute.wav -n spectrogram
-
-signal at 10 Khz = 591.54943 rad/s
-./cserialmux -f TrialFile.txt -b 1591.54943 -m  BASE -p 12.5 -l 10000 -r 1 -k 0.5 -s 44100|sox -b 32 -t raw -r 44100 -s -L -c1 -e float -b 32 - "signal10k.wav" && sox signal10k.wav -n spectrogram -l -o signal10k.png
-
-signal at 5KHz
-./cserialmux -f TrialFile.txt -b 795.774715 -m  BASE -p 12.5 -l 10000 -r 1 -k 0.5 -s 44100|sox -b 32 -t raw -r 44100 -s -L -c1 -e float -b 32 - "signal5k.wav" && sox signal5k.wav -n spectrogram -l -o signal5k.png
-
-signal at 15k
-./cserialmux -f TrialFile.txt -b 2387.324145 -m  BASE -p 12.5 -l 10000 -r 1 -k 0.5 -s 44100|sox -b 32 -t raw -r 44100 -s -L -c1 -e float -b 32 - "signal15k.wav" && sox signal15k.wav -n spectrogram -l -o signal15k.png
-
-carrier at 10k
-./cserialmux -f TrialFile.txt -b 1591.54943 -m  PASS -p 1.59154943 -l 10000 -r 1 -k 0.5 -s 44100|sox -b 32 -t raw -r 44100 -s -L -c1 -e float -b 32 - "carrier10k.wav" && sox carrier10k.wav -n spectrogram -l -o carrier10k.png
-
-carrier at 5KHz
-./cserialmux -f TrialFile.txt -b 1 -m  PASS -p 0.795774715 -l 1 -r 1 -k 0.5 -s 44100|sox -b 32 -t raw -r 44100 -s -L -c1 -e float -b 32 - "carrier5k.wav" && sox carrier5k.wav -n spectrogram -l -o carrier5k.png
-
-carrier at 15k
-./cserialmux -f TrialFile.txt -b 1 -m  PASS -p 2.387324145 -l 1 -r 1 -k 0.5 -s 44100|sox -b 32 -t raw -r 44100 -s -L -c1 -e float -b 32 - "carrier15k.wav" && sox carrier15k.wav -n spectrogram -l -o carrier15k.png
-
-
-
-./cserialmux -f TrialFile.txt -b 5 -m  BASE -p 10 -l 100 -r 1 -k 0.5 -s 44100|sox -b 32 -t raw -r 44100 -s -L -c1 -e float -b 32 - "ctemp.wav" && sox ctemp.wav -n rate 20 spectrogram -o ctemp.png
-
-
-./cserialmux -f TrialFile.txt -b 2 -m  SINGLT -p 12 -l 100 -r 1 -k 0.2 -s 30|sox -b 32 -t raw -r 30 -s -L -c1 -e float -b 32 - "ctemp.wav" && sox ctemp.wav -n rate 40 spectrogram -o ctemp.png
-
-./cserialmux -f TrialFile.txt -b 2 -m  BASK -p 12 -l 100 -r 1 -k 0.2 -s 30|sox -b 32 -t raw -r 30 -s -L -c1 -e float -b 32 - "ctemp.wav" && sox ctemp.wav -n rate 40 spectrogram -o ctemp.png
-
-./cserialmux -f TrialFile.txt -b 2 -m  BPSK -p 12 -l 100 -r 1 -k 0.2 -s 30|sox -b 32 -t raw -r 30 -s -L -c1 -e float -b 32 - "ctemp.wav" && sox ctemp.wav -n rate 40 spectrogram -o ctemp.png
-
-
-./cserialmux -f TrialFile.txt -b 2 -m  BFSK -p 12 -l 100 -r 1 -k 0.2 -s 30|sox -b 32 -t raw -r 30 -s -L -c1 -e float -b 32 - "ctemp.wav" && sox ctemp.wav -n rate 40 spectrogram -o ctemp.png
-
-./cserialmux -f TrialFile.txt -b 2 -m  4QAM -p 12 -l 10 -r 1 -k 0.2 -s 30|sox -b 32 -t raw -r 30 -s -L -c1 -e float -b 32 - "ctemp.wav" && sox ctemp.wav -n rate 40 spectrogram -o ctemp.png
-
------------------
-sox -n -r 48000 -c1 tmp.wav synth 1 sine 100 sine 200 && sox tmp.wav tmp.dat && sox tmp.wav -n rate 1000 spectrogram -o tmp.png
-
-sox -n -r 48000 -c1 tmp1.wav synth 1 sine 100 && sox -n -r 48000 -c1 tmp2.wav synth 1 sine 200 && sox -m tmp1.wav tmp2.wav tmp.wav && sox tmp.wav tmp.dat && sox tmp.wav -n rate 1000 spectrogram -o tmp.png
----------------
-gnuplot -p -e "plot 'tmp.dat' using 1:2"
-
-gnuplot -p -e "set terminal png" -e "set output 'tmpx.png'" -e "set yrange [-1:1]" -e "set xrange [0:0.05]" -e "plot 'tmp.dat' using 1:2 with lines"
-
-*/
