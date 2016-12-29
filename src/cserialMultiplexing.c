@@ -1,27 +1,26 @@
-/*******************************************************************************************
- *				CSERIAL MULTIPLEXING
- *	AUTHOR	|Brian Onang'o
- *	COMPANY1|Upande Ltd (http://www.upande.co.ke)
- *	COMPANY2|Circuits and Systems Engineering Company (CSECO)
- *	DATE	|December 2016
- *_________________________________________________________________________________________
- *										Description
- * Software for performing modulation in audio frequency range enabling the testing of RF 
- * modulation concepts using audio frequency spectral analysis software.
- * The specific modulation scheme implemented here is cserial multiplexing. More details
- * about this modulation scheme can be found here -> ___________
- * 
- * For more information please see ReadMe.txt available with this file and the documentation 
- * in the program comments.
- *__________________________________________________________________________________________
- *										Dependancies
- *
- *__________________________________________________________________________________________
- *										LICENSE
+/********************************************************************************************\
+ *				CSERIAL MULTIPLEXING																				  *
+ *	AUTHOR	|Brian Onang'o																						  *
+ *	COMPANY1|Upande Ltd (http://www.upande.co.ke) 														  *
+ *	COMPANY2|Circuits and Systems Engineering Company (CSECO)										  *
+ *	DATE	|December 2016														  									  *
+ *_________________________________________________________________________________________ *
+ *										Description														  			  *
+ * Software for performing modulation in audio frequency range enabling the testing of RF   *
+ * modulation concepts using audio frequency spectral analysis software.						  *
+ * The specific modulation scheme implemented here is cserial multiplexing. More details	  *
+ * about this modulation scheme can be found here -> ___________									  *
+ * 														  															  *
+ * For more information please see ReadMe.txt available with this file and the documentation* 
+ * in the program comments.														  							  *
+ *__________________________________________________________________________________________*
+ *					Dependancies														  							  *
+ *														  																  *
+ *__________________________________________________________________________________________*
+ *					LICENSE														  									  *
  *******************************************************************************************/
-//./cserialmux -f TrialFile.txt -b 1 -m  PASS -p 12.5 -l 1 -r 1 -k 0.5 |sox -t raw -r 44100 -s -L -b 16 -c2 - "outputp.wav" &&  sox outputp.wav outputp.dat &&  plot "outputp.dat" 
 
- /* Environment. Uncomment if compiling in linux */
+ /* Environment. Uncomment if working in linux */
 //#define CSCOMPILER TCC
 
  /*
@@ -29,11 +28,13 @@
   */
 #include <stdio.h>      /* printf fprintf sprintf fopen fputs */
 #include <stdbool.h>    /* bool type */
-#include <math.h>   	/* M_PI */
+#include <math.h>   		/* M_PI */
 #include <stdbool.h>    /* bool type */
 #include <stdlib.h>		/* exit codes */
 #include <stdint.h>     /* C99 types */
 #include <string.h>     /* C99 types */
+#include <sys/stat.h>	/*file access*/
+#include <fcntl.h>
 
 #ifdef CSCOMPILER
 	#include <cs_optarg.h>
@@ -45,10 +46,9 @@
 /*
  *	Sampling rate and buffer size
  */
-//#define S_RATE  44100
 const int DEFAULT_S_RATE = 44100;
-#define B_SIZE  (10481048)
-#define B_OUT_SIZE  (4096)
+#define B_SIZE  (1024)
+#define B_OUT_SIZE  (48100) 		//max sampling rate = 48100
 
 /*
  *	Length of file name
@@ -107,10 +107,12 @@ encoding BPSK(tym t, char* bits);
 encoding BFSK(tym t, char* bits);
 encoding BASK(tym t, char* bits);
 encoding QAM4(tym t, char* bits);
-encoding basebandCarrier(tym time);
-encoding passbandCarrier(tym time);
-byte writeData(uint16_t i2);
-
+encoding basebandCarrier_f(tym time);
+encoding passbandCarrier_f(tym time);
+uint16_t writeData(uint16_t i2);
+byte appendData(uint16_t i2);
+byte createOutFile(void);
+byte getChannel(char *channelStr);
 carrier basebandcarrier;
 carrier passbandcarrier;
 char data[B_SIZE];
@@ -131,6 +133,8 @@ int main(int argc, char **argv)
 	
 	char arg_s[64];
 	char FileName[FNAMELEN];
+	char channelStr[4];
+	byte channel = 1;//default is passband
 	float basebandfrequency, passbandfrequency, Tb, Tsym, Td, Symfreq, SymRate; //symbol rate is relative to frequency. How many symbols per period?
 	char modTypes[8];
 	int Sympos, Symposprev, BitPos;
@@ -140,7 +144,7 @@ int main(int argc, char **argv)
 	passbandfrequency = DEFAULT_PASSBANDF;
 	SymRate = 1;	
 	///* parse command line options 
-    while ((i = getopt (argc, argv, "f:b:m:p:l:r:k:s:h")) != -1) {
+    while ((i = getopt (argc, argv, "f:b:m:p:l:r:k:s:c:h")) != -1) {
 	switch (i) {
 		case 'h':
 			usage();
@@ -177,6 +181,9 @@ int main(int argc, char **argv)
 		case 's': 
 			S_RATE = atof(optarg);
 			break;
+		case 'c':
+			strcpy(channelStr, optarg);
+			break;
 
 		default:
 			MSGf("ERROR: argument parsing failure, use -h option for help\n");
@@ -185,7 +192,11 @@ int main(int argc, char **argv)
         }
     }
 	
+	byte createOFile = createOutFile();
+	if(createOFile == 0)csExit(1, "");
+	
 	readData(FileName);
+	
 	modType = modulationTypeIndex(modTypes);
 	bitspersym = bitsperSymbol(modType);
 	
@@ -193,6 +204,7 @@ int main(int argc, char **argv)
 	basebandcarrier.amplitude = DEFAULTAMPLITUDE;
 	passbandcarrier.frequency = passbandfrequency;
 	passbandcarrier.amplitude = DEFAULTAMPLITUDE;
+	
 	printf("Baseband frequency (-b) set to: %f Hz\n", basebandcarrier.frequency); //remove from here
 	printf("Passband frequency (-p) set to: %f Hz\n", passbandcarrier.frequency); //remove from here
 	printf("Baseband amplitude set to: %f\n", basebandcarrier.amplitude); //remove from here
@@ -215,7 +227,8 @@ int main(int argc, char **argv)
 	modConstantkf = (modIndex * basebandcarrier.frequency)/basebandcarrier.amplitude;
 	printf("Modulation Index (-k) set to: %f\n", modIndex);						//remove from here
 	printf("Modulation Constant set to: %f\n", modConstantkf);					//remove from here
-	
+	channel = getChannel(channelStr);
+	printf("Channel (-c) set to: %d (0: BASEband, 1: PASSband)\n", channel);	//remove from here
 	printf(".\n..\n...\n....\n");
 	i2 = 0;
 	
@@ -223,7 +236,7 @@ int main(int argc, char **argv)
 	{
 		Sympos = floor(time/Tsym);	//symbol position
 		BitPos = (Sympos * bitspersym) + 1 - 1;	//start of bits for current symbol -1(Index from zero)
-		//goto temporaryend;
+		
 		bytepos = floor(BitPos/8);
 		
 		byte beetpos = 0;
@@ -238,9 +251,11 @@ int main(int argc, char **argv)
 		
 		encoding basebandval = basebandmodulation(modType, time, bitsinSymbol);
 		encoding passbandval = passbandmodulation(modType, basebandval, time);
-		buffer[i2] = passbandval;
+		if(channel == 1)buffer[i2] = passbandval;
+		else buffer[i2] = basebandval;
 		i2++;
-		
+		i2 = writeData(i2);			//write if buffer is full
+		//i2++;
 		time += T_RATE;
 		if(Sympos > Symposprev )
 		{
@@ -248,22 +263,19 @@ int main(int argc, char **argv)
 			j += bitspersym;
 			
 		}
-			
+		
 	}
-	//fwrite(buffer, sizeof(encoding), i2, stdout);
-	byte writeSuccess = writeData(i2);
+	i2++;
+	if(i2 > B_OUT_SIZE)i2 = B_OUT_SIZE;
+	byte writeSuccess = appendData(i2);
 	if(writeSuccess == 0)csExit(1, "");
-	MSGf("Data successfully written to tmp/rawout");
+	MSGf("Data successfully written to tmp/rawout\n");
    return 0;
 }
 
 byte getBit(int bytepos, int bitpos)
 {
-	char buyt = data[bytepos];
-	//printf("%c\n", buyt);//exit(0);
-	//printf("%s\n", data);
-	//printf("%c\n", buyt);
-	
+	char buyt = data[bytepos];	
 	char beet = (buyt >> bitpos) & 0x00000001;
 	byte tmp = (byte) beet;
 	
@@ -278,6 +290,7 @@ void readData(char *fname)
 	strcat(ifname,"tmp/");
 	strcat(ifname,fname);
 	FILE* dataFile = fopen(ifname, "r");
+	*ifname = '\0';			//clear
 	if(dataFile == NULL)
 	{
 		usage();
@@ -290,20 +303,56 @@ void readData(char *fname)
 		if( feof(dataFile))break ;
 		data[i++] = c;
 	}
-
+	fclose(dataFile);
 }
 
-byte writeData(uint16_t i2)
+uint16_t writeData(uint16_t i2)
 {
+	static int packet_count = 0;
+	if(i2 == B_OUT_SIZE)
+	{
+		char ofname[FNAMELEN];
+		*ofname = '\0';			//clear
+		strcat(ofname,"tmp/");
+		strcat(ofname,OUTFILE);
+		FILE* dataFile = fopen(ofname, "a");
+		*ofname = '\0';			//clear
+		if(dataFile == NULL) return false;
+		fwrite(buffer, sizeof(encoding), i2, dataFile);
+		fclose(dataFile);
+		packet_count++;
+		return 0;	//reset i2
+	}
+	
+	return i2;
+}
+
+byte appendData(uint16_t i2)
+{
+	char ofname[FNAMELEN];
+	*ofname = '\0';			//clear
+	strcat(ofname,"tmp/");
+	strcat(ofname,OUTFILE);
+	FILE* dataFile = fopen(ofname, "a");
+	strcat(ofname,OUTFILE);
+	fwrite(buffer, sizeof(encoding), i2, dataFile);
+	fclose(dataFile);
+	*ofname = '\0';			//clear
+	return true;
+}
+
+byte createOutFile()
+{
+	byte ret = true;
 	char ofname[FNAMELEN];
 	strcat(ofname,"tmp/");
 	strcat(ofname,OUTFILE);
-	FILE* dataFile = fopen(ofname, "w");
-	if(dataFile == NULL) return false;
+	int fd = open(ofname, O_RDWR|O_CREAT, 0777); 
+	if(fd == -1)ret = false;
+	*ofname = '\0';			//clear ofname
+	ret = true;
 	
-	
-	fwrite(buffer, sizeof(encoding), i2, dataFile);
-	return true;
+	return ret;
 }
 
 void csExit(byte errorCode, char* msg)
@@ -355,13 +404,13 @@ encoding basebandmodulation(byte modType, tym time, char* bits)
 		case 11:
 			break;
 		case 12:
-			ret = basebandCarrier(time);
+			ret = basebandCarrier_f(time);
 			break;
 		case 13:
-			ret = passbandCarrier(time);
+			ret = 0;
 			break;
 		case 14:
-			ret = basebandCarrier(time);
+			ret = basebandCarrier_f(time);
 			break;
 			
 	}
@@ -379,15 +428,16 @@ encoding passbandmodulation(byte modType, encoding basebandval, tym time)
 		case 12:
 			ret = basebandval;
 			break;
-		case 13:
-			ret = (passbandcarrier.amplitude * cosFunc(passbandcarrier.frequency * time, 0));
-			break;
+		/*case 13:
+			//ret = (passbandcarrier.amplitude * cosFunc(passbandcarrier.frequency * time, 0));
+			ret = passbandCarrier_f(time);
+			break;*/
 		/*case 14:
 			ret = basebandval;
 			break;*/
 		default:
 			tmp = cosFunc(passbandcarrier.frequency * time, modConstantkf *  basebandval);
-			ret = passbandcarrier.amplitude * tmp;//0;//(encoding) (passbandcarrier.amplitude * );
+			ret = passbandcarrier.amplitude * tmp;
 	}
 	
 	return ret;
@@ -426,14 +476,13 @@ encoding QAM4(tym t, char* bits)
 	return tmp;
 }
 
-encoding basebandCarrier(tym t)
+encoding basebandCarrier_f(tym t)
 {	
-	encoding tmp = (basebandcarrier.amplitude * cosFunc(basebandcarrier.frequency * t, 0));
-	//	printf("Cosval: %f, then:%f\n", cosFunc(basebandcarrier.frequency * t, 0), tmp);	
+	encoding tmp = (basebandcarrier.amplitude * cosFunc(basebandcarrier.frequency * t, 0));	
 	return tmp;
 }
 
-encoding passbandCarrier(tym t)
+encoding passbandCarrier_f(tym t)
 {
 	encoding tmp = (passbandcarrier.amplitude * cosFunc(passbandcarrier.frequency * t, 0));
 	return tmp;
@@ -463,6 +512,15 @@ byte modulationTypeIndex(char* modtype)
 	
 	printf("Modulation type Set to: %d (%s)\n", ret, modtype); //remove from here
 	return ret;
+}
+
+byte getChannel(char *channelStr)
+{
+	byte channel;
+	strcmp(channelStr,"BASE")==0?channel = 0:false;
+	strcmp(channelStr,"PASS")==0?channel = 1:false;
+	
+	return channel;
 }
 
 byte bitsperSymbol(byte modType)
@@ -526,6 +584,7 @@ void usage(void) {
     MSGf(" -l <int> Length of data to modulate in bytes. Zero for entire file.\n");
     MSGf(" -r <float> Symbol rate (Symbols/second).\n");
     MSGf(" -k <float> Modulation Constant.\n");
+    MSGf(" -c <str> Channel {BASE(band) or PASS(band)}.\n");
 }
 
 //F:b:m:p:n:l:h
